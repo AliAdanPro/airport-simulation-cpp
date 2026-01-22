@@ -1,0 +1,1318 @@
+================================================================================
+     SMART AIRPORT OPERATIONS MANAGEMENT SYSTEM - COMPREHENSIVE REPORT
+================================================================================
+
+                    HMFQ-PPRA and AWSC-PPC Implementation
+                    Operating Systems Course Project
+
+================================================================================
+                            TABLE OF CONTENTS
+================================================================================
+
+1. EXECUTIVE SUMMARY
+2. SYSTEM ARCHITECTURE OVERVIEW
+3. CORE COMPONENTS
+   3.1 Main Entry Point (main.cpp)
+   3.2 Configuration System (config.h)
+   3.3 Type Definitions (types.h)
+4. SIMULATION ENGINE
+   4.1 Simulation Class (simulation.h/cpp)
+   4.2 Lifecycle Management
+   4.3 Update Loop
+5. FLIGHT OPERATIONS
+   5.1 FlightManager
+   5.2 RunwayManager
+   5.3 GateManager
+   5.4 TaxiwayNetwork
+6. GROUND SERVICES
+   6.1 Service Dependencies
+   6.2 Resource Management
+7. PASSENGER AND BAGGAGE HANDLING
+8. CREW MANAGEMENT
+9. CRISIS AND WEATHER MANAGEMENT
+10. HMFQ-PPRA SCHEDULING ALGORITHM
+    10.1 Layer 1: Multi-Level Feedback Queue
+    10.2 Layer 2: Predictive Impact Score (PIS)
+    10.3 Layer 3: Exponential Aging
+    10.4 Layer 4: Dynamic Quantum Adjustment
+    10.5 Layer 5: Priority Inheritance
+    10.6 Layer 6: Cost-Benefit Preemption
+    10.7 Layer 7: Starvation Prevention
+    10.8 Layer 8: Adaptive Learning
+11. AWSC-PPC PAGE REPLACEMENT ALGORITHM
+    11.1 Component 1: Enhanced Working Set Tracking
+    11.2 Component 2: Multi-Pass Clock
+    11.3 Component 3: Predictive Prefetching
+    11.4 Component 4: Adaptive Compression
+    11.5 Components 5-8: Additional Features
+12. DATA MANAGEMENT HIERARCHY
+13. FINANCIAL TRACKING
+14. DISPLAY SYSTEM
+15. THREADING AND SYNCHRONIZATION
+16. BUG ANALYSIS: FLIGHTS STUCK AT ZERO
+17. CODE STRUCTURE AND ORGANIZATION
+18. TEST PLAN AND VERIFICATION
+
+================================================================================
+                        1. EXECUTIVE SUMMARY
+================================================================================
+
+This document provides a comprehensive theoretical and practical analysis of
+the Smart Airport Operations Management System, a complex simulation that
+demonstrates operating systems concepts including:
+
+- Multi-threaded programming using POSIX threads (pthread)
+- Mutex and read-write lock synchronization primitives
+- Scheduling algorithms (HMFQ-PPRA)
+- Memory/page replacement algorithms (AWSC-PPC)
+- Resource allocation and deadlock prevention
+- Real-time event processing
+
+The system simulates a Tier-1 international airport with:
+- 3 runways capable of handling aircraft from light jets to A380
+- 40 gates (international, domestic, cargo, private)
+- 7 types of ground resources (fuel trucks, baggage carts, etc.)
+- Complete passenger and baggage processing pipelines
+- Dynamic weather and crisis management
+- Financial tracking and budget constraints
+
+================================================================================
+                    2. SYSTEM ARCHITECTURE OVERVIEW
+================================================================================
+
+The system follows a modular architecture with the following major components:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              MAIN.CPP                                    │
+│                         (Application Entry Point)                       │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            SIMULATION                                    │
+│                    (Central Coordination Engine)                        │
+│  ┌──────────────┬──────────────┬──────────────┬──────────────┐         │
+│  │  DataManager │  Scheduler   │MemoryManager │  Display     │         │
+│  │  (Hierarchical│  (HMFQ-PPRA)│  (AWSC-PPC)  │  (Dashboard) │         │
+│  │   Storage)   │              │              │              │         │
+│  └──────────────┴──────────────┴──────────────┴──────────────┘         │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+│   FLIGHT OPERATIONS │ │   GROUND SERVICES   │ │   PASSENGER/CREW    │
+│  ┌───────────────┐  │ │  ┌───────────────┐  │ │  ┌───────────────┐  │
+│  │ FlightManager │  │ │  │GroundService │  │ │  │PassengerProc  │  │
+│  │ RunwayManager │  │ │  │   Manager     │  │ │  │BaggageHandler │  │
+│  │ GateManager   │  │ │  └───────────────┘  │ │  │ CrewManager   │  │
+│  │TaxiwayNetwork │  │ │                     │ │  └───────────────┘  │
+│  └───────────────┘  │ │                     │ │                     │
+└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+                                 │
+                                 ▼
+                  ┌───────────────────────────┐
+                  │    CRISIS MANAGEMENT      │
+                  │   ┌───────────────────┐   │
+                  │   │   CrisisManager   │   │
+                  │   │  (Weather/Events) │   │
+                  │   └───────────────────┘   │
+                  └───────────────────────────┘
+
+================================================================================
+                        3. CORE COMPONENTS
+================================================================================
+
+3.1 MAIN ENTRY POINT (main.cpp)
+─────────────────────────────────
+
+The main.cpp file serves as the application entry point and handles:
+
+1. Command Line Argument Parsing:
+   - -s <speed>: Simulation speed multiplier (default 1.0)
+   - -t <time>: Run duration in seconds (0 = indefinite)
+   - -d: Demo mode with auto-generated events
+   - -h: Help message
+
+2. Initialization Sequence:
+   a. Create Simulation object
+   b. Register signal handler (SIGINT for graceful shutdown)
+   c. Initialize all subsystems (printed to console)
+   d. Create Display object and link to Simulation
+   e. Set speed multiplier
+   f. Start simulation threads
+
+3. Main Display Loop:
+   - Clears screen every second
+   - Renders dashboard via Display::renderDashboard()
+   - Checks for run time limit
+
+4. Signal Handling:
+   - Graceful shutdown on Ctrl+C (SIGINT)
+   - Calls simulation->stop() to terminate threads
+
+3.2 CONFIGURATION SYSTEM (config.h)
+─────────────────────────────────────
+
+The config.h file defines all configurable parameters organized into sections:
+
+SIMULATION SETTINGS:
+- REAL_TIME_MODE: Whether 1 sim second = 1 real second (true)
+- SIMULATION_DURATION: 86400 seconds (24 hours)
+- DASHBOARD_UPDATE_INTERVAL: 30 seconds
+
+AIRPORT INFRASTRUCTURE:
+- NUM_RUNWAYS: 3
+- TOTAL_GATES: 40 (international large/medium, domestic large/medium, cargo, private)
+
+GROUND RESOURCES:
+- Quantity of each resource type (fuel trucks, baggage carts, etc.)
+- Service time ranges (min/max for refueling, cleaning, catering, etc.)
+
+HMFQ-PPRA PARAMETERS:
+- Queue quantum values (emergency=unlimited, critical=200, high=150, etc.)
+- Priority ranges for each queue level
+- Demotion thresholds
+- Aging time constants
+- PIS weights (α, β, γ, δ, ε summing to 1.0)
+
+AWSC-PPC PARAMETERS:
+- Working set base window
+- Phase multipliers (init, compute, I/O, terminate)
+- Victim score weights (frequency, recency, pattern, prediction)
+- Compression thresholds
+
+AIRCRAFT SPECIFICATIONS:
+- Detailed specs for each aircraft type (A380, B777, B737, A320, etc.)
+- Wake turbulence categories
+- Passenger capacity, fuel capacity, crew requirements
+- Service time multipliers
+
+WAKE TURBULENCE SEPARATION:
+- Matrix of required separation times between aircraft categories
+- SUPER->SUPER: 180s, SUPER->LIGHT: 360s, LIGHT->LIGHT: 60s, etc.
+
+3.3 TYPE DEFINITIONS (types.h)
+────────────────────────────────
+
+The types.h file defines all fundamental data structures:
+
+TIME TYPES:
+- TimeUnit: long long (simulation time in seconds)
+- SimClock: std::chrono::steady_clock
+- SimTime: time_point<SimClock>
+
+AIRCRAFT ENUMS:
+- AircraftType: A380, B777, B737, A320, B747F, B777F, G650, FALCON_7X, 
+                MEDICAL_EVAC, DIVERSION, FUEL_EMERGENCY
+- WakeTurbulenceCategory: SUPER, HEAVY, MEDIUM, LIGHT
+
+FLIGHT STRUCTURES:
+- FlightStatus: SCHEDULED, APPROACHING, LANDING, LANDED, TAXIING_IN, 
+                AT_GATE, BOARDING, PUSHBACK, TAXIING_OUT, WAITING_TAKEOFF,
+                DEPARTING, DEPARTED, CANCELLED, DIVERTED, GO_AROUND
+- FlightType: DOMESTIC, INTERNATIONAL, CARGO, PRIVATE, EMERGENCY
+- Flight struct: Complete flight information including ID, schedule, 
+                 assignments, passengers, crew, services, fuel, delays
+
+GATE AND RUNWAY:
+- GateType: INTERNATIONAL_LARGE/MEDIUM, DOMESTIC_LARGE/MEDIUM, CARGO, PRIVATE
+- RunwayStatus: AVAILABLE, OCCUPIED_LANDING/TAKEOFF/CROSSING, CLOSED_*
+- Gate struct: ID, name, type, capacity, customs, occupancy, terminal
+- Runway struct: ID, name, heading, length, capabilities, status
+
+SERVICE TYPES:
+- ServiceType: PASSENGER_DEBOARDING, BAGGAGE_UNLOADING, FIRE_SAFETY_CHECK,
+               REFUELING, CLEANING, CATERING, MAINTENANCE_CHECK, 
+               BAGGAGE_LOADING, PASSENGER_BOARDING, PUSHBACK, DEICING
+- ResourceType: FUEL_TRUCK, BAGGAGE_CART, CATERING_TRUCK, CLEANING_CREW,
+                MAINTENANCE_TEAM, JETBRIDGE, DEICING_TRUCK
+
+PASSENGER AND CREW:
+- PassengerType: REGULAR, VIP, DISABLED, UNACCOMPANIED_MINOR, CONNECTING
+- CrewType: PILOT_CAPTAIN, PILOT_FIRST_OFFICER, CABIN_CREW, GROUND_* 
+- CrewStatus: AVAILABLE, ON_DUTY, ON_BREAK, FATIGUED, OFF_DUTY, STANDBY
+
+WEATHER AND CRISIS:
+- WeatherType: CLEAR, LIGHT/HEAVY_RAIN, THUNDERSTORM, FOG, SNOW, ICE, 
+               HIGH_WIND, TORNADO_WARNING
+- EmergencyType: MECHANICAL_FAILURE, MEDICAL_EMERGENCY, SECURITY_INCIDENT,
+                 FUEL_SHORTAGE, BIRD_STRIKE, HYDRAULIC_FAILURE, etc.
+- ThreatLevel: NORMAL, ELEVATED, HIGH, SEVERE, CRITICAL
+
+SCHEDULING (HMFQ-PPRA):
+- SchedulerQueue: EMERGENCY, CRITICAL, HIGH, NORMAL, LOW
+- OperationType: RUNWAY_LANDING/TAKEOFF, GATE_ASSIGNMENT, GROUND_SERVICE, etc.
+- Operation struct: ID, type, priority, queue, timing, PIS components, etc.
+
+MEMORY (AWSC-PPC):
+- ProcessPhase: INITIALIZATION, COMPUTATION, IO, TERMINATION
+- AccessPattern: SEQUENTIAL, RANDOM, STRIDED, LOOP
+- PageFrame struct: pageId, process, R/M bits, frequency, access time, etc.
+- ProcessMemoryState struct: working set tracking, transition matrix
+
+================================================================================
+                        4. SIMULATION ENGINE
+================================================================================
+
+4.1 SIMULATION CLASS
+──────────────────────
+
+File: simulation.h / simulation.cpp
+
+The Simulation class is the central coordinator of all airport operations.
+
+KEY RESPONSIBILITIES:
+1. Component lifecycle management (creation, initialization, destruction)
+2. Main simulation loop execution
+3. Time management and speed control
+4. Update coordination across all subsystems
+5. Statistics collection and reporting
+6. Event triggering (weather, emergencies)
+
+OWNED COMPONENTS (via unique_ptr):
+- DataManager: Hierarchical data storage
+- Scheduler: HMFQ-PPRA implementation
+- MemoryManager: AWSC-PPC implementation
+- RunwayManager: Runway allocation and management
+- GateManager: Gate assignment and tracking
+- TaxiwayNetwork: Graph-based taxiway navigation
+- FlightManager: Flight lifecycle management
+- GroundServiceManager: Ground service coordination
+- PassengerProcessor: Passenger pipeline processing
+- BaggageHandler: Baggage tracking and routing
+- CrewManager: Crew scheduling and fatigue
+- CrisisManager: Weather and emergency handling
+- FinancialTracker: Cost and revenue tracking
+
+4.2 LIFECYCLE MANAGEMENT
+─────────────────────────
+
+INITIALIZATION SEQUENCE (initialize() method):
+1. Create core components (DataManager, Scheduler, MemoryManager)
+2. Create operational components with dependencies
+3. Wire up inter-component dependencies (e.g., FlightManager needs RunwayManager)
+4. Call initialize() on each component
+
+START SEQUENCE (start() method):
+1. Set running = true
+2. Start Scheduler thread
+3. Start MemoryManager thread
+4. Record start time
+5. Generate initial scheduled flights
+6. Create and start simulation thread
+
+STOP SEQUENCE (stop() method):
+1. Set running = false
+2. Join simulation thread
+3. Stop Scheduler and MemoryManager threads
+
+4.3 UPDATE LOOP
+─────────────────
+
+The main simulation loop (runSimulation()) runs in a dedicated thread:
+
+LOOP CYCLE (runs at ~60 Hz):
+1. Check if paused - if so, sleep 100ms and continue
+2. Calculate real time elapsed since last iteration
+3. Apply speed multiplier to get simulation time elapsed
+4. Advance simulation time
+5. Call update functions:
+   - updateFlights(): Process flight state machine
+   - updateGroundServices(): Advance ground service tasks
+   - updatePassengers(): Process passenger pipeline
+   - updateCrew(): Handle fatigue and breaks
+   - updateCrises(): Update weather and emergency states
+6. Every 60 simulation seconds:
+   - updateStatistics(): Collect performance metrics
+   - Simulate random events (crises, equipment failures)
+   - Generate additional flights during rush hours
+7. Sleep 16ms to maintain ~60 updates/second
+
+FLIGHT STATE MACHINE (updateFlights):
+The updateFlights() method processes active flights through their state machine:
+
+SCHEDULED → [BUG: This transition is missing!]
+APPROACHING → processArrival() → Request runway for landing
+LANDING → [handled by runway timeout]
+LANDED → Find and assign gate → TAXIING_IN
+TAXIING_IN → After 5 min taxi time → AT_GATE, start turnaround
+AT_GATE → When turnaround complete → PUSHBACK
+PUSHBACK → processDeparture() → Request runway for takeoff → DEPARTING
+DEPARTING → After 2 min takeoff → Release runway/gate → DEPARTED
+
+================================================================================
+                        5. FLIGHT OPERATIONS
+================================================================================
+
+5.1 FLIGHT MANAGER
+───────────────────
+
+File: aircraft.cpp (lines 915-1159)
+
+The FlightManager handles the complete lifecycle of flights:
+
+CREATION (createFlight):
+- Assigns unique flight ID
+- Initializes flight structure with:
+  * Aircraft type and specifications
+  * Scheduled arrival and departure times
+  * Status = SCHEDULED
+  * Passenger count, fuel requirements
+- Stores in flights map
+- Updates DataManager
+
+ARRIVAL PROCESSING (processArrival):
+- Requests landing runway via RunwayManager
+- Gets aircraft wake turbulence category
+- Assigns runway if available
+- Transitions to LANDING status
+
+DEPARTURE PROCESSING (processDeparture):
+- Requests takeoff runway via RunwayManager
+- Assigns runway if available
+- Transitions to DEPARTING status
+
+PRIORITY CALCULATION (calculateFlightPriority):
+- Base priority: 50
+- Emergency: 0 (highest)
+- Delay > 120 min: -20
+- Delay > 60 min: -10
+- International: -5
+- Large aircraft (>300 pax): -10
+- Clamped to [0, 100]
+
+ACTIVE FLIGHT TRACKING:
+- getAllActiveFlights(): Returns flights not in SCHEDULED, DEPARTED, CANCELLED
+- getFlightsByStatus(): Filter by specific status
+- getTotalActiveFlights(): Count of active flights
+
+5.2 RUNWAY MANAGER
+───────────────────
+
+File: aircraft.cpp (lines 15-276)
+
+Manages runway allocation with wake turbulence separation:
+
+LANDING REQUEST (requestLanding):
+1. Find suitable runway (available, can handle category)
+2. Check wake turbulence separation from last landing
+3. Calculate required separation time based on categories
+4. If runway available now, assign and mark OCCUPIED_LANDING
+5. Set busyUntil = currentTime + 120 seconds (2 min landing)
+6. Track last landing category for wake separation
+
+TAKEOFF REQUEST (requestTakeoff):
+1. Find available runway capable of handling aircraft
+2. Assign and mark OCCUPIED_TAKEOFF
+3. Set busyUntil = currentTime + 90 seconds (1.5 min takeoff)
+
+WAKE TURBULENCE SEPARATION:
+Uses Config::WAKE_SEPARATION matrix:
+- SUPER behind SUPER: 180s
+- SUPER behind HEAVY: 240s
+- SUPER behind MEDIUM: 300s
+- SUPER behind LIGHT: 360s
+- LIGHT behind anything: 60s
+- etc.
+
+WIND HANDLING:
+- handleWindChange(): Select optimal runway based on wind direction
+- Close runways with crosswind component > 35 knots
+- calculateCrosswindComponent using trigonometry
+
+5.3 GATE MANAGER
+─────────────────
+
+File: aircraft.cpp (lines 278-539)
+
+Manages gate assignment with constraints:
+
+GATE TYPES (40 total):
+- International Large (4): A380 capable, customs, terminal 1
+- International Medium (8): B777 capable, customs, terminal 1
+- Domestic Large (6): B777 capable, terminal 2
+- Domestic Medium (12): B737/A320, terminal 2
+- Cargo (4): Cargo aircraft only, terminal 3
+- Private (6): Private jets only, terminal 4
+
+ASSIGNMENT (assignGate):
+1. Determine required gate size from aircraft specs
+2. Find available gate that is compatible:
+   - Size capacity >= required
+   - Gate type matches flight type
+   - Customs available if international
+3. Mark gate occupied with flight ID
+4. Update DataManager
+
+OPTIMAL GATE (findOptimalGate):
+- Score based on walking distance to security
+- Bonus for connecting passengers (minimize walking)
+- Select highest scoring available gate
+
+COMPATIBILITY CHECK (isGateCompatible):
+- Size must be sufficient
+- International flights need customs
+- Cargo aircraft must use cargo gates
+- Private jets must use private gates
+
+5.4 TAXIWAY NETWORK
+────────────────────
+
+File: aircraft.cpp (lines 541-913)
+
+Graph-based taxiway network with A* pathfinding:
+
+NETWORK STRUCTURE:
+- Runway nodes: Entry/exit points for each runway
+- Spine nodes: Main taxiway (ALPHA 0-9)
+- Gate nodes: Individual gates
+
+PATHFINDING (findPath):
+Uses A* algorithm:
+1. Initialize g-scores, f-scores, came-from
+2. Add start node to priority queue
+3. Process nodes by lowest f-score
+4. For each neighbor not blocked:
+   - Calculate tentative g-score
+   - Update if better path found
+   - Add to open set
+5. Reconstruct path from came-from
+
+GRIDLOCK DETECTION (detectGridlock):
+- Check for occupied nodes where all neighbors blocked
+- Gridlock if 3+ aircraft cannot move
+
+PUSHBACK COORDINATION:
+- requestPushback(): Check if pushback area clear
+- Reserve taxiway node for pushback operation
+- completePushback(): Release gate node
+
+================================================================================
+                        6. GROUND SERVICES
+================================================================================
+
+6.1 SERVICE DEPENDENCIES
+─────────────────────────
+
+Ground services follow a dependency graph:
+
+Aircraft Arrival
+       │
+       ├── Passenger Deboarding (immediate)
+       │          │
+       │          └── Baggage Unloading (immediate)
+       │                     │
+       │                     └── Fire Safety Check
+       │                              │
+       │                              └── Refueling
+       │
+       └── Cleaning (after deboarding complete)
+                  │
+                  ├── Catering (after cleaning)
+                  │       │
+                  │       └── Baggage Loading (after catering)
+                  │                   │
+                  │                   └── Passenger Boarding
+                  │                              │
+                  │                              └── Pushback → Departure
+                  │
+                  └── Maintenance Check (can overlap with cleaning)
+
+SERVICE DEPENDENCIES (from types.h ServiceTask):
+Each service tracks:
+- dependencies: List of services that must complete first
+- requiredResources: Resources needed to perform service
+- estimatedDuration: Base time modified by aircraft type
+- progressPercent: Current completion percentage
+
+6.2 RESOURCE MANAGEMENT
+────────────────────────
+
+LIMITED RESOURCES:
+- 8 Fuel Trucks (refueling: 20-40 min)
+- 12 Baggage Carts
+- 6 Catering Trucks (international needs 2)
+- 4 Cleaning Crews (15-45 min depending on size)
+- 3 Maintenance Teams
+- 10 Jetbridges
+- 2 De-icing Trucks (winter only)
+
+SERVICE TIME VARIABILITY:
+- Base time varies by aircraft type (A380 = 3x vs A320)
+- International flights: +30% service time
+- Weather affects outdoor operations
+- Random equipment failures: 5% probability
+- Crew skill variation: ±20%
+
+================================================================================
+                    7. PASSENGER AND BAGGAGE HANDLING
+================================================================================
+
+PASSENGER PROCESSING PIPELINE:
+1. Arrival at airport
+2. Check-in Queue → Check-in (10 counters, 2-5 min/passenger)
+3. Security Queue → Security Screening (5 lanes, 3-8 min)
+4. [Random] Secondary Screening (5% probability)
+5. [International] Customs Queue → Customs (2-10 min)
+6. Terminal → Gate (arrive 20 min before departure)
+7. Boarding (by zones, 15-30 min)
+
+SPECIAL HANDLING:
+- VIP: 50% faster processing
+- Disabled: Assistance required
+- Unaccompanied Minors: Escort required
+- Connecting Passengers: Priority if <60 min connection
+
+BAGGAGE HANDLING:
+- RFID tracking throughout system
+- Automated conveyor belt network with sorting nodes
+- Priority tags for tight connections
+- Misrouting probability: 5%
+- Transfer bags between connecting flights
+
+================================================================================
+                        8. CREW MANAGEMENT
+================================================================================
+
+CREW TYPES:
+1. Pilots (Captain, First Officer): 8-10 hour duty limit
+2. Cabin Crew: 12-14 hour duty limit  
+3. Ground Crew (loaders, cleaners, refuelers, mechanics)
+4. Air Traffic Controllers: 2-hour shifts, mandatory breaks
+5. Gate Agents: Check-in and boarding
+
+CREW CONSTRAINTS:
+- Maximum duty hours per day
+- Minimum 8 hours rest between duties
+- Skill qualifications (aircraft type certifications)
+- Break every 2 hours, 30 min duration
+
+FATIGUE SIMULATION:
+- Fatigue increases with work hours (+0.1 per hour)
+- Decreases with rest (-0.2 per hour)
+- Warning level: 0.7
+- Critical level: 0.9 (mandatory break)
+- Performance degrades as fatigue increases
+- Tasks take longer with fatigued crew
+
+CREW REPLACEMENT:
+- Track availability and qualifications
+- Replace fatigued crew from standby pool
+- Delay operations if crew shortage
+
+================================================================================
+                    9. CRISIS AND WEATHER MANAGEMENT
+================================================================================
+
+WEATHER EVENTS:
+- Thunderstorm: Close runways 30-60 min
+- Fog: Reduce landing rate by 50%
+- Snow/Ice: Require de-icing (20-40 min delay)
+- High Winds: Change runway configuration
+- Tornado Warning: Complete ground stop
+
+OPERATIONAL EMERGENCIES:
+- Mechanical Failures (2%): Engine issues, hydraulic problems, bird strikes
+- Medical Emergencies (1%): Passenger/crew illness, priority landing
+- Security Incidents: Suspicious packages, unruly passengers, cyber threats
+- Fuel Shortages: Prioritize long-haul, ration fuel
+
+THREAT LEVELS:
+- Level 1 (Normal): Standard operations
+- Level 2 (Elevated): Enhanced screening (+30% time)
+- Level 3 (High): All bags screened (+50% time)
+- Level 4 (Severe): Only critical flights
+- Level 5 (Critical): Complete shutdown
+
+================================================================================
+                    10. HMFQ-PPRA SCHEDULING ALGORITHM
+================================================================================
+
+Hybrid Multi-Level Feedback Queue with Predictive Priority Round-Robin and 
+Aging (HMFQ-PPRA) is an 8-layer scheduling algorithm designed to handle 
+complex airport operations efficiently.
+
+10.1 LAYER 1: MULTI-LEVEL FEEDBACK QUEUE
+─────────────────────────────────────────
+
+FIVE PRIORITY QUEUES:
+
+Queue 0 (EMERGENCY): Priority 0-10
+- Quantum: Unlimited (run to completion)
+- For: Fuel emergency, medical evacuation, critical system failures
+- Never demoted
+
+Queue 1 (CRITICAL): Priority 11-30
+- Quantum: 200 time units
+- For: Emergency landings, severely delayed flights (>2 hours)
+- Demote to Queue 2 after 2 quantum expirations
+
+Queue 2 (HIGH): Priority 31-50
+- Quantum: 150 time units
+- For: International long-haul, delayed flights (30-120 min), VIP
+- Demote to Queue 3 after 3 quantum expirations
+
+Queue 3 (NORMAL): Priority 51-75
+- Quantum: 100 time units
+- For: On-time domestic flights, cargo, regular operations
+- Demote to Queue 4 after 4 quantum expirations
+
+Queue 4 (LOW): Priority 76-100
+- Quantum: 50 time units
+- For: Private jets, non-critical ground operations, maintenance
+- Cannot be demoted further
+
+IMPLEMENTATION (scheduler.cpp):
+- 5 deque<Operation*> queues with individual pthread mutexes
+- determineInitialQueue(): Map priority to queue level
+- demoteOperation(): Move to next lower queue, reset expiration count
+- promoteOperation(): Move to specified higher queue
+
+10.2 LAYER 2: PREDICTIVE IMPACT SCORE (PIS)
+────────────────────────────────────────────
+
+PIS quantifies the potential impact of delaying an operation:
+
+FORMULA:
+PIS = α × Delay_Propagation + β × Connection_Risk + γ × Resource_Utilization 
+    + δ × Weather_Risk + ε × Fuel_Criticality
+
+where α + β + γ + δ + ε = 1.0
+
+WEIGHTS (from config.h):
+- α (PIS_ALPHA) = 0.25: Delay propagation
+- β (PIS_BETA) = 0.20: Connection risk
+- γ (PIS_GAMMA) = 0.20: Resource utilization
+- δ (PIS_DELTA) = 0.15: Weather risk
+- ε (PIS_EPSILON) = 0.20: Fuel criticality
+
+FACTOR CALCULATIONS:
+- Delay_Propagation = Affected_Flights / Total_Flights
+- Connection_Risk = Passengers_At_Risk / Total_Connecting_Passengers
+- Resource_Utilization = Blocked_Resources / Total_Resources
+- Weather_Risk = (Severity × Time_Affected) / Total_Resources (capped at 1.0)
+- Fuel_Criticality = 0.8 for emergencies, 0 otherwise
+
+USAGE:
+Higher PIS → Lower priority number → Higher actual priority
+Priority adjustment = PIS × 10 (subtracted from base priority)
+
+10.3 LAYER 3: EXPONENTIAL AGING
+────────────────────────────────
+
+Prevents starvation using exponential aging:
+
+FORMULA:
+Age_Increment = Base_Age_Rate × e^(Wait_Time / Time_Constant)
+Priority_Boost = Current_Priority - (Age_Increment × Age_Weight)
+
+TIME CONSTANTS (per queue):
+- Queue 4: 120 seconds (2 minutes) - fastest aging
+- Queue 3: 180 seconds (3 minutes)
+- Queue 2: 300 seconds (5 minutes)
+- Queue 1: 480 seconds (8 minutes)
+- Queue 0: 10000 seconds (effectively no aging)
+
+IMPLEMENTATION:
+- agingLoop(): Separate thread running runAging() every 1 second
+- applyAging(): For each operation in queues 1-4:
+  * Calculate wait time
+  * Calculate exponential age increment
+  * Reduce priority number (increase actual priority)
+
+10.4 LAYER 4: DYNAMIC QUANTUM ADJUSTMENT
+─────────────────────────────────────────
+
+Adjusts quantum based on system load and operation type:
+
+FORMULA:
+Actual_Quantum = Base_Quantum × Load_Factor × Operation_Factor
+
+LOAD FACTOR:
+Load_Factor = 1 - (Active_Operations / Max_Operations)²
+Range: [0.4, 1.0]
+
+OPERATION FACTOR:
+- Simple operations (taxiing): 0.7
+- Medium operations (loading): 1.0
+- Complex operations (full turnaround): 1.3
+
+IMPLEMENTATION (calculateActualQuantum):
+- Emergency queue: Unlimited (returns 999999)
+- Get base quantum from queueQuantums array
+- Calculate load factor from queue sizes
+- Apply operation-specific factor
+- Minimum: 10 time units
+
+10.5 LAYER 5: PRIORITY INHERITANCE
+───────────────────────────────────
+
+Prevents priority inversion when high-priority blocked by low-priority:
+
+MECHANISM:
+1. High-priority operation blocked waiting for resource
+2. Low-priority operation holding the resource
+3. Temporarily boost low-priority to high-priority level
+4. Track inheritance chain
+5. Upon resource release, restore original priority
+
+IMPLEMENTATION (applyPriorityInheritance):
+- Check if blocker priority > blocked priority
+- Save original priority
+- Set blocker priority = blocked priority
+- Create PriorityInheritanceChain record
+
+IMPLEMENTATION (restorePriority):
+- Check hasPriorityInheritance flag
+- Restore originalPriority
+- Remove from inheritanceChains map
+
+10.6 LAYER 6: COST-BENEFIT PREEMPTION
+──────────────────────────────────────
+
+Decision-based preemption using cost-benefit analysis:
+
+PREEMPTION BENEFIT:
+Benefit = Urgency × Delay_Cost
+- Urgency = 1 - (priority / 100)
+- Delay_Cost = wait_time × 0.1
+
+PREEMPTION COST:
+Cost = Progress_Lost × 0.5 + Context_Switch_Cost + Resource_Config_Cost 
+     + Downstream_Impact × 10
+- Context_Switch_Cost = 5.0
+- Resource_Config_Cost = 2.0
+- Downstream_Impact = PIS
+
+DECISION (shouldPreempt):
+if (Benefit > 1.5 × Cost) → Preempt
+
+EXECUTION (executePreemption):
+1. Save state of preempted operation
+2. Set isPreempted = true, increment preemptionCount
+3. Give compensation (reduce quantum expiration count)
+4. Add preempted operation to front of queue (fairness)
+
+10.7 LAYER 7: STARVATION PREVENTION
+────────────────────────────────────
+
+Guaranteed service for operations waiting too long:
+
+MAX WAIT THRESHOLDS:
+- Queue 4: 15 minutes (900 seconds)
+- Queue 3: 20 minutes (1200 seconds)
+- Queue 2: 30 minutes (1800 seconds)
+
+MECHANISM (checkStarvation):
+For operations in queues 2, 3, 4:
+1. Calculate wait time
+2. If wait > threshold AND not already guaranteed:
+   - Set hasGuaranteedService = true
+   - Promote to CRITICAL queue (Queue 1)
+   - Log starvation prevention
+
+After completion, reset guaranteed service flag.
+
+10.8 LAYER 8: ADAPTIVE LEARNING
+────────────────────────────────
+
+System learns from historical patterns:
+
+TRACKED STATISTICS (per operation type):
+- Average completion time
+- Variance in completion time
+- Historical success rate
+- Average resource consumption
+
+UPDATE FORMULA (weighted moving average):
+New_Estimate = 0.7 × Old_Estimate + 0.3 × Actual_Value
+
+IMPLEMENTATION:
+- OperationStats struct with update() method
+- updateStatistics(): Called on operation completion
+- getPredictedDuration(): Returns learned average for operation type
+- adjustThresholds(): Periodically adjust parameters (every 100 operations)
+
+================================================================================
+                    11. AWSC-PPC PAGE REPLACEMENT ALGORITHM
+================================================================================
+
+Advanced Working Set Clock with Predictive Prefetching and Adaptive 
+Compression (AWSC-PPC) is an 8-component page replacement algorithm.
+
+11.1 COMPONENT 1: ENHANCED WORKING SET TRACKING
+────────────────────────────────────────────────
+
+Dynamic per-process working set window:
+
+FORMULA:
+Δ_actual = Δ_base × Phase_Multiplier × Load_Multiplier × Fault_Rate_Multiplier
+
+BASE WINDOW: 15 time units
+
+PHASE MULTIPLIERS:
+- Initialization: 1.5 (more pages during startup)
+- Computation: 1.0 (stable working set)
+- I/O: 0.7 (less memory actively used)
+- Termination: 0.5 (reducing footprint)
+
+LOAD MULTIPLIERS:
+- Light (<40% memory): 1.3
+- Medium (40-70%): 1.0
+- Heavy (70-90%): 0.8
+- Critical (>90%): 0.6
+
+FAULT RATE MULTIPLIERS:
+- <5%: 0.9 (can reduce working set)
+- 5-15%: 1.0 (maintain current)
+- >15%: 1.2 (increase working set)
+
+11.2 COMPONENT 2: MULTI-PASS CLOCK
+───────────────────────────────────
+
+Each page frame maintains metadata (PageFrame struct):
+- pageId, processId
+- Reference Bit (R), Modified Bit (M)
+- Access Frequency (F): 16-bit counter with decay
+- Last Access Time (T)
+- Access Pattern: Sequential/Random/Strided
+- Working Set Member (W): Boolean
+- Prefetch Candidate (P): Boolean
+- Compression Ratio
+- Lock Bit (L): Pinned pages
+- Prediction Score: Future access probability
+
+THREE-PASS SELECTION:
+
+PASS 1: Working Set Protection
+- Skip if working set age ≤ Δ AND W = true
+- Skip if L = true (locked)
+- If R = 1: Clear R, increment F, update pattern, continue
+- If R = 0: Add to candidate list
+
+PASS 2: Scoring and Selection
+Victim_Score = (Freq_Component × W_freq) + (Rec_Component × W_rec) 
+             + (Pattern_Component × W_pat) + (Pred_Component × W_pred)
+             - (Dirty_Penalty × M) - (Compression_Benefit × Compression_Ratio)
+
+Components:
+- Frequency: 1 / (F + 1) — higher F → lower score → less likely evicted
+- Recency: (Current_Time - T) / Avg_Lifetime — older → higher score
+- Pattern: Sequential=0.5, Random=1.0, Strided=0.7
+- Prediction: 1 - Prediction_Score — high future access → less eviction
+- Dirty Penalty: 2.0 if modified
+- Compression Benefit: -0.8 if ratio > 0.5
+
+Weights: W_freq=0.3, W_rec=0.3, W_pat=0.2, W_pred=0.2
+
+Select page with HIGHEST Victim_Score.
+
+PASS 3: Forced Replacement (if no candidate)
+1. Find oldest clean page outside working set
+2. Find least frequently used modified page outside working set
+3. Select random page from lowest priority process
+4. (Last resort) Evict from current process
+
+11.3 COMPONENT 3: PREDICTIVE PREFETCHING
+─────────────────────────────────────────
+
+PATTERN DETECTION:
+- Sequential: Pages accessed as i, i+1, i+2... → Prefetch next 3-5 pages
+- Strided: Pages accessed as i, i+k, i+2k... → Prefetch i+4k, i+5k
+- Loop: Same pages repeatedly → Lock in memory, mark as hot
+
+PREFETCH TRIGGER:
+if (Pattern_Detected AND Memory_Available > 20%):
+    Prefetch_Count = min(5, Available_Frames / 4)
+    Prefetch next pages in detected pattern
+    Mark as Prefetch_Candidate
+
+11.4 COMPONENT 4: ADAPTIVE COMPRESSION
+───────────────────────────────────────
+
+CANDIDATE SELECTION:
+if (F < Threshold_Freq AND (Current_Time - T) > Compression_Age):
+    Attempt_Compression(Page)
+
+COMPRESSION:
+if (Compressed_Size < 0.6 × Original_Size):
+    Store compressed version
+    Free original frame
+    Mark as compressed
+    Update Compression_Ratio
+
+DECOMPRESSION:
+On page fault for compressed page:
+    Decompress to available frame
+    Update access statistics
+    Add decompression time to latency
+
+11.5 COMPONENTS 5-8: ADDITIONAL FEATURES
+─────────────────────────────────────────
+
+COMPONENT 5: FREQUENCY DECAY
+Every 1000 time units:
+    For all pages: F = F × 0.9
+    (Gives more weight to recent access patterns)
+
+COMPONENT 6: PROCESS PRIORITY INTEGRATION
+Victim_Score multiplier:
+- High priority process: ×2.0 (less likely evicted)
+- Medium priority: ×1.0
+- Low priority: ×0.5 (more likely evicted)
+
+COMPONENT 7: THRASHING DETECTION AND PREVENTION
+Fault_Rate = Page_Faults_Last_Minute / Total_Memory_Accesses
+
+if (Fault_Rate > 0.25):
+    Enter Thrashing_Prevention_Mode:
+    - Suspend lowest priority processes
+    - Increase working set windows by 50%
+    - Disable prefetching
+    - Compress more aggressively
+    - Reduce active processes
+
+COMPONENT 8: MACHINE LEARNING PREDICTION (Simplified)
+Markov Chain for page access prediction:
+- Transition_Matrix[Page_i][Page_j] = Probability of Page_j after Page_i
+- On access: Increment Transition_Matrix[Previous][Current], normalize
+- Prediction: Next = argmax(Transition_Matrix[Current][j])
+- If probability > 0.6: Assign high Prediction_Score, protect from eviction
+
+================================================================================
+                    12. DATA MANAGEMENT HIERARCHY
+================================================================================
+
+Four-level hierarchical data storage with different access speeds:
+
+LEVEL 1: CRITICAL REAL-TIME DATA (Access time: 1 time unit)
+- Current runway status
+- Gate occupancy
+- Emergency alerts
+- Requires immediate consistency
+
+LEVEL 2: ACTIVE OPERATIONS DATA (Access time: 5 time units)
+- Flight schedules (next 2 hours)
+- Resource availability
+- Crew assignments
+- Weather data
+
+LEVEL 3: SYSTEM DATA (Access time: 20 time units)
+- Full daily schedule
+- Passenger manifests
+- Maintenance records
+
+LEVEL 4: HISTORICAL DATA (Access time: 100 time units)
+- Past flight records
+- Statistics
+- Audit logs
+- Can tolerate delays
+
+DATA CONSISTENCY:
+- Critical data: Immediate consistency required
+- Statistical data: Can tolerate delays
+- Version control for conflicting updates
+
+================================================================================
+                    13. FINANCIAL TRACKING
+================================================================================
+
+OPERATIONAL COSTS:
+- Fuel: $5.00/gallon
+- Crew overtime: $100/hour
+- Delay compensation: $200-800/passenger
+- Gate rental: $500/hour
+- Maintenance: $150/hour
+- De-icing: $10,000/large aircraft
+
+REVENUE:
+- Landing fees (base: $500)
+- Gate fees ($8/minute = $480/hour)
+- Passenger fees
+- Cargo fees
+
+BUDGET MANAGEMENT:
+- Daily budget: $500,000
+- Track all costs and revenues
+- Implement cost-cutting when exceeded
+- Generate profit/loss reports
+
+IMPLEMENTATION (FinancialTracker class):
+- Separate maps for costs and revenues by category
+- Thread-safe with pthread_mutex
+- Methods for adding each cost/revenue type
+- getTotalCosts(), getTotalRevenue(), getProfit()
+- isWithinBudget(), getBudgetRemaining()
+
+================================================================================
+                        14. DISPLAY SYSTEM
+================================================================================
+
+File: display.cpp
+
+Text-based dashboard with sections:
+
+1. HEADER
+   - Title: "SMART AIRPORT OPERATIONS MANAGEMENT SYSTEM"
+   - Simulation time (HH:MM:SS format)
+   - Speed multiplier
+
+2. FLIGHT INFORMATION DISPLAY
+   - Table with columns: Flight, Type, Status, Gate, Runway, Delay, Progress
+   - Shows up to 15 active flights
+   - "No active flights" if empty
+
+3. RUNWAY STATUS
+   - Status of each runway (Available, Landing, Takeoff, Weather, etc.)
+
+4. GATE UTILIZATION
+   - Visual bar graph showing percentage occupied
+
+5. GROUND RESOURCES
+   - Availability counts for each resource type
+
+6. ALERTS & WEATHER
+   - Current weather conditions
+   - Wind speed and direction
+   - Visibility
+   - De-icing status
+   - Active emergency alerts
+
+7. OPERATIONAL STATISTICS
+   - Flights processed
+   - Active flights
+   - Average delay
+   - Runway/gate utilization
+   - Emergencies handled
+
+8. FINANCIAL SUMMARY
+   - Total revenue, costs, net profit
+   - Budget status
+
+9. HMFQ-PPRA SCHEDULER METRICS
+   - Operations completed/pending
+   - Preemptions
+   - Average wait/turnaround time
+   - Efficiency percentage
+
+10. AWSC-PPC MEMORY METRICS
+    - Memory utilization percentage
+
+================================================================================
+                    15. THREADING AND SYNCHRONIZATION
+================================================================================
+
+THREADS IN THE SYSTEM:
+
+1. Main Thread
+   - Runs display loop
+   - Clears screen and renders dashboard every second
+
+2. Simulation Thread (simulationThread)
+   - Runs runSimulation()
+   - Updates all subsystems at ~60 Hz
+
+3. Scheduler Thread (schedulerThread)
+   - Runs runScheduler()
+   - Processes operations from queues
+
+4. Aging Thread (agingThread)
+   - Runs runAging()
+   - Applies exponential aging every second
+
+5. Memory Manager Threads (3 threads in MemoryManager):
+   a. Decay Thread (decayThread)
+      - Runs runDecay() every 1000 time units
+      - Applies frequency decay to all pages (F = F * 0.9)
+   b. Compression Thread (compressionThread)
+      - Periodically checks for compression candidates
+      - Compresses infrequently accessed pages using RLE
+   c. Write-Back Thread (writeBackThread)
+      - Manages dirty page write-back buffer
+      - Batches writes for efficiency
+
+6. Demo Thread (optional, -d flag)
+   - Triggers demo events (weather, emergency)
+
+SYNCHRONIZATION PRIMITIVES:
+
+1. pthread_mutex_t:
+   - statsMutex: Protects SimulationStats
+   - queueMutexes[5]: One per scheduler queue
+   - operationsMutex: Protects allOperations map
+   - currentOpMutex: Protects currently running operation
+   - condMutex: Condition variable mutex
+   - runwayMutex, gateMutex, taxiwayMutex: Resource protection
+   - logMutex, inheritanceMutex: Logging and inheritance chains
+
+2. pthread_rwlock_t:
+   - flightLock: Read-heavy access to flights map
+   - systemStateLock: PIS system state
+   - statsLock: Operation statistics
+
+3. pthread_cond_t:
+   - operationAvailable: Signal when operations added to queue
+
+4. std::atomic:
+   - running: Simulation running state
+   - paused: Pause state
+   - nextOperationId, nextFlightId: ID generators
+
+================================================================================
+                    16. BUG ANALYSIS: FLIGHTS STUCK AT ZERO
+================================================================================
+
+SYMPTOM:
+When running the simulation, all metrics show 0:
+- Active Flights: 0
+- Flights Processed: 0
+- Gate Utilization: 0%
+- All resources show as available
+
+ROOT CAUSE ANALYSIS:
+
+1. Flight Creation (generateScheduledFlights, line 490-509):
+   - Creates 20 flights with status = SCHEDULED
+   - Scheduled arrival times: 60 to 7200 seconds from start
+
+2. Active Flight Query (getAllActiveFlights, lines 1055-1067):
+   ```cpp
+   if (pair.second.status != FlightStatus::DEPARTED &&
+       pair.second.status != FlightStatus::CANCELLED &&
+       pair.second.status != FlightStatus::SCHEDULED) {  // <-- PROBLEM!
+       result.push_back(&pair.second);
+   }
+   ```
+   This EXCLUDES flights with SCHEDULED status!
+
+3. Flight Update (updateFlights, line 354):
+   ```cpp
+   std::vector<Flight*> activeFlights = flightManager->getAllActiveFlights();
+   ```
+   Only processes "active" flights, which excludes SCHEDULED.
+
+4. MISSING TRANSITION:
+   There is NO code that transitions flights from SCHEDULED to APPROACHING
+   when their scheduledArrival time is reached!
+
+CONSEQUENCE:
+- Flights are created as SCHEDULED
+- They never become APPROACHING
+- getAllActiveFlights() never returns them
+- updateFlights() never processes them
+- They remain SCHEDULED forever
+- All metrics stay at 0
+
+THE FIX:
+Add code at the beginning of updateFlights() to check all flights:
+- For each flight with status == SCHEDULED
+- If simulationTime >= flight.scheduledArrival
+- Transition to status = APPROACHING
+
+================================================================================
+                    17. CODE STRUCTURE AND ORGANIZATION
+================================================================================
+
+FILE ORGANIZATION:
+part2/
+├── main.cpp              # Entry point, CLI parsing, main loop
+├── config.h              # All configurable parameters
+├── types.h               # Enums, structs, data types
+├── simulation.h/cpp      # Central simulation engine
+├── scheduler.h/cpp       # HMFQ-PPRA implementation
+├── memory_manager.h/cpp  # AWSC-PPC implementation
+├── data_manager.h/cpp    # Hierarchical data storage
+├── aircraft.h/cpp        # Flight, Runway, Gate, Taxiway managers
+├── ground_services.h/cpp # Ground service coordination
+├── passenger.h/cpp       # Passenger and baggage processing
+├── crew.h/cpp            # Crew scheduling and fatigue
+├── crisis_manager.h/cpp  # Weather and emergency handling
+├── display.h/cpp         # Text-based dashboard
+└── README.md             # Project documentation
+
+DESIGN PATTERNS USED:
+1. Singleton-like: Global simulation pointer for signal handling
+2. Observer-like: DataManager notified of state changes
+3. Strategy: Different aircraft specs, service time formulas
+4. State Machine: Flight status transitions
+5. Factory-like: Flight creation in FlightManager
+
+CODE QUALITY:
+- Consistent naming conventions (camelCase for functions, PascalCase for classes)
+- Comprehensive comments and documentation
+- Modular design with clear separation of concerns
+- Thread-safe with proper synchronization
+
+================================================================================
+                    18. TEST PLAN AND VERIFICATION
+================================================================================
+
+UNIT TESTS (per component):
+
+1. Scheduler Tests:
+   - Queue assignment based on priority
+   - Demotion after quantum expirations
+   - Aging increases priority over time
+   - Starvation prevention triggers at threshold
+   - Priority inheritance prevents inversion
+
+2. Memory Manager Tests:
+   - Working set calculation
+   - Victim score computation
+   - Pattern detection (sequential, strided)
+   - Compression triggers for cold pages
+
+3. Flight Manager Tests:
+   - Flight creation with correct initial state
+   - Status transitions
+   - Gate assignment compatibility
+   - Runway allocation with separation
+
+INTEGRATION TESTS:
+
+1. Basic Flow:
+   - Start simulation
+   - Verify flights transition from SCHEDULED to APPROACHING
+   - Verify landing, taxiing, gate operations
+   - Verify departure and completion
+
+2. Resource Contention:
+   - Create multiple simultaneous arrivals
+   - Verify queue waiting when runways busy
+   - Verify ground resource allocation
+
+3. Crisis Handling:
+   - Trigger weather event
+   - Verify runway closures
+   - Verify operations continue on available resources
+
+STRESS TESTS:
+
+1. Rush Hour Surge:
+   - 20 aircraft requesting landing in 10 minutes
+   - Verify no deadlocks
+   - Verify fair processing
+
+2. Resource Starvation:
+   - Fill all gates
+   - Verify incoming flights wait appropriately
+
+3. Emergency Priority:
+   - Declare emergency for one flight
+   - Verify immediate priority handling
+
+PERFORMANCE METRICS TO MONITOR:
+- Average wait time < 30 minutes (except emergencies)
+- Runway utilization > 50% during peak
+- Gate utilization > 60%
+- No deadlocks or infinite waits
+
+================================================================================
+                            END OF REPORT
+================================================================================
+
+
+Project: Smart Airport Operations Management System
+Algorithms: HMFQ-PPRA Scheduling, AWSC-PPC Page Replacement
